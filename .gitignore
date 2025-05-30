@@ -1,9 +1,0 @@
-pycache/
-*.pyc
-*.pyo
-*.pyd
-*.db
-.sqlite3
-.env
-output_.mp4
-*_4k.mp4
