@@ -19,4 +19,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 ENV BOT_TOKEN=""
 
 # Run the bot (run both main.py and app.py in background)
-CMD bash -c "python3 main.py & python3 app.py"
+CMD python3 main.py & python3 app.py
