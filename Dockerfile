@@ -11,7 +11,7 @@ rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-Copy project files
+#Copy project files
 
 COPY . /app
 
