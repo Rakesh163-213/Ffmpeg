@@ -1,59 +1,116 @@
 import os
+import shutil
 import subprocess
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
+import time
+from pyrogram import Client, filters
+from pyrogram.types import Message
+from pyrogram.enums import ChatAction
+from config import API_ID, API_HASH, BOT_TOKEN
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+DOWNLOAD_DIR = "./downloads"
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("📽️ Send me a video (MP4/WEBM), and I'll upscale it to 4K!")
+# Track upload progress
+last_progress_time = {}
+last_progress_bytes = {}
 
-async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    video = update.message.video or update.message.document
-    if not video:
-        await update.message.reply_text("⚠️ Please send a valid video file.")
-        return
+app = Client(
+    "mega_bot_session",
+    api_id=API_ID,
+    api_hash=API_HASH,
+    bot_token=BOT_TOKEN
+)
 
-    file_id = video.file_id
-    new_filename = f"{file_id}_input.mp4"
-    output_filename = f"{file_id}_4k.mp4"
+# Determine if file is video
+def is_video(file_path):
+    return file_path.lower().endswith(('.mp4', '.mkv', '.mov', '.avi', '.webm'))
 
-    await update.message.reply_text("📥 Downloading your video...")
-    file = await context.bot.get_file(file_id)
-    await file.download_to_drive(new_filename)
+# Upload progress with speed and ETA
+async def progress(current, total, message: Message, file_name):
+    now = time.time()
+    chat_id = message.chat.id
 
-    await update.message.reply_text("⏳ Converting to 4K... Please wait.")
+    # Get last update info
+    prev_time = last_progress_time.get(chat_id, now)
+    prev_bytes = last_progress_bytes.get(chat_id, 0)
 
-    try:
-        # Run FFmpeg command
-        ffmpeg_command = [
-            "ffmpeg", "-y", "-i", new_filename,
-            "-vf", "scale=3840:2160",
-            "-c:v", "libx264", "-preset", "slow", "-crf", "20",
-            "-c:a", "aac", "-b:a", "128k",
-            output_filename
-        ]
-        process = subprocess.run(ffmpeg_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    elapsed = max(now - prev_time, 1e-5)
+    speed = (current - prev_bytes) / elapsed  # bytes/sec
+    speed_mb = round(speed / (1024 * 1024), 2)
 
-        if process.returncode != 0:
-            raise Exception(process.stderr)
+    remaining = total - current
+    if speed > 0:
+        eta = int(remaining / speed)
+        eta_str = time.strftime("%M:%S", time.gmtime(eta))
+    else:
+        eta_str = "Calculating..."
 
-        await update.message.reply_text("✅ Conversion complete. Uploading now...")
-        with open(output_filename, "rb") as video_file:
-            await update.message.reply_video(video=video_file, caption="🎉 Here is your 4K video!")
+    # Save current state
+    last_progress_time[chat_id] = now
+    last_progress_bytes[chat_id] = current
 
-    except Exception as e:
-        await update.message.reply_text(f"❌ Conversion failed:\n{str(e).strip()[:300]}")
+    percent = int(current * 100 / total)
+    bar_len = 20
+    filled_len = percent * bar_len // 100
+    bar = "▰" * filled_len + "▱" * (bar_len - filled_len)
 
-    finally:
-        # Cleanup
-        if os.path.exists(new_filename):
-            os.remove(new_filename)
-        if os.path.exists(output_filename):
-            os.remove(output_filename)
+    uploaded_mb = round(current / (1024 * 1024), 2)
+    total_mb = round(total / (1024 * 1024), 2)
 
-if __name__ == "__main__":
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.VIDEO | filters.Document.VIDEO, handle_video))
-    app.run_polling()
+    await message.edit_text(
+        f"📤 Uploading `{file_name}`\n\n"
+        f"{bar} {percent}%\n"
+        f"📦 {uploaded_mb}/{total_mb} MB\n"
+        f"⚡️ Speed: {speed_mb} MB/s\n"
+        f"⏳ ETA: {eta_str}"
+    )
+
+# Handle MEGA.nz links
+@app.on_message(filters.private & filters.text)
+async def mega_handler(client: Client, message: Message):
+    text = message.text
+
+    if "mega.nz" in text:
+        status = await message.reply_text("📥 Downloading from MEGA...")
+
+        try:
+            if not os.path.exists(DOWNLOAD_DIR):
+                os.makedirs(DOWNLOAD_DIR)
+
+            cmd = f"megatools dl --path={DOWNLOAD_DIR} '{text}'"
+            subprocess.run(cmd, shell=True, check=True)
+
+            for root, dirs, files in os.walk(DOWNLOAD_DIR):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    file_msg = await message.reply_text("📤 Uploading...")
+
+                    await client.send_chat_action(message.chat.id, ChatAction.UPLOAD_DOCUMENT)
+
+                    if is_video(file_path):
+                        await client.send_video(
+                            chat_id=message.chat.id,
+                            video=file_path,
+                            caption=f"✅ Uploaded: `{file}`",
+                            progress=progress,
+                            progress_args=(file_msg, file)
+                        )
+                    else:
+                        await client.send_document(
+                            chat_id=message.chat.id,
+                            document=file_path,
+                            caption=f"✅ Uploaded: `{file}`",
+                            progress=progress,
+                            progress_args=(file_msg, file)
+                        )
+
+                    os.remove(file_path)
+
+            shutil.rmtree(DOWNLOAD_DIR)
+
+        except Exception as e:
+            await status.edit_text(f"❌ Error: {str(e)}")
+
+    else:
+        await message.reply_text("❗ Please send a valid mega.nz link.")
+
+app.run()
