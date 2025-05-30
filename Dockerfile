@@ -1,11 +1,11 @@
 FROM python:3.10-slim
 
-# Install megatools
+# Install dependencies
 RUN apt-get update && \
     apt-get install -y wget build-essential git pkg-config libssl-dev zlib1g-dev && \
-    wget https://megatools.megous.com/builds/megatools-1.11.1.tar.gz && \
-    tar -xvzf megatools-1.11.1.tar.gz && \
-    cd megatools-1.11.1 && ./configure && make && make install && \
+    wget https://xff.cz/megatools/megatools-1.11.4.tar.gz && \
+    tar -xvzf megatools-1.11.4.tar.gz && \
+    cd megatools-1.11.4 && ./configure && make && make install && \
     cd .. && rm -rf megatools*
 
 # Set working directory
