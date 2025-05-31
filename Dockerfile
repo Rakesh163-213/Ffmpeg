@@ -4,7 +4,9 @@ FROM python:3.10-slim
 RUN apt-get update && \
     apt-get install -y megatools && \
     apt-get clean
-
+    
+RUN apt-get update && \
+    apt-get install -y ffmpeg
 # Set working directory
 WORKDIR /app
 
