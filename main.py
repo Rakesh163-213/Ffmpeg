@@ -155,3 +155,4 @@ async def handle_mega(client, message: Message):
 if __name__ == "__main__":
     Thread(target=run_flask).start()
     client.run()
+    
