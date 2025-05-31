@@ -6,6 +6,7 @@ from pyrogram import Client, filters
 from pyrogram.types import Message
 from pyrogram.enums import ChatAction
 from config import API_ID, API_HASH, BOT_TOKEN
+from moviepy.editor import VideoFileClip
 
 DOWNLOAD_DIR = "./downloads"
 
@@ -24,27 +25,34 @@ app = Client(
 def is_video(file_path):
     return file_path.lower().endswith(('.mp4', '.mkv', '.mov', '.avi', '.webm'))
 
+# Create thumbnail
+def create_thumbnail(video_path, thumb_path):
+    subprocess.run([
+        "ffmpeg", "-i", video_path,
+        "-ss", "00:00:01.000", "-vframes", "1",
+        thumb_path
+    ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+# Get duration using moviepy
+def get_video_duration(path):
+    clip = VideoFileClip(path)
+    return int(clip.duration)
+
 # Upload progress with speed and ETA
 async def progress(current, total, message: Message, file_name):
     now = time.time()
     chat_id = message.chat.id
 
-    # Get last update info
     prev_time = last_progress_time.get(chat_id, now)
     prev_bytes = last_progress_bytes.get(chat_id, 0)
 
     elapsed = max(now - prev_time, 1e-5)
-    speed = (current - prev_bytes) / elapsed  # bytes/sec
+    speed = (current - prev_bytes) / elapsed
     speed_mb = round(speed / (1024 * 1024), 2)
 
     remaining = total - current
-    if speed > 0:
-        eta = int(remaining / speed)
-        eta_str = time.strftime("%M:%S", time.gmtime(eta))
-    else:
-        eta_str = "Calculating..."
+    eta_str = time.strftime("%M:%S", time.gmtime(int(remaining / speed))) if speed > 0 else "Calculating..."
 
-    # Save current state
     last_progress_time[chat_id] = now
     last_progress_bytes[chat_id] = current
 
@@ -87,13 +95,21 @@ async def mega_handler(client: Client, message: Message):
                     await client.send_chat_action(message.chat.id, ChatAction.UPLOAD_DOCUMENT)
 
                     if is_video(file_path):
+                        thumb_path = os.path.join(DOWNLOAD_DIR, "thumb.jpg")
+                        create_thumbnail(file_path, thumb_path)
+                        duration = get_video_duration(file_path)
+
                         await client.send_video(
                             chat_id=message.chat.id,
                             video=file_path,
                             caption=f"✅ Uploaded: `{file}`",
+                            duration=duration,
+                            thumb=thumb_path,
+                            supports_streaming=True,
                             progress=progress,
                             progress_args=(file_msg, file)
                         )
+                        os.remove(thumb_path)
                     else:
                         await client.send_document(
                             chat_id=message.chat.id,
