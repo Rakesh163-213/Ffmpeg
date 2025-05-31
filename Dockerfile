@@ -12,10 +12,11 @@ WORKDIR /app
 COPY . /app
 
 # Make sure start.sh is executable
-RUN chmod +x /app/start.sh
+#RUN chmod +x /app/start.sh
 
 # Install Python dependencies
 RUN pip install --no-cache-dir flask pyrogram tgcrypto
 
 # Run start.sh (which should start your bot or other services)
-CMD ["./start.sh"]
+#CMD ["./start.sh"]
+CMD python main.py & python app.py
