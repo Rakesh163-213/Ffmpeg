@@ -1,12 +1,10 @@
 FROM python:3.10-slim
 
-# Install megatools via apt
+# Install megatools and ffmpeg via apt
 RUN apt-get update && \
-    apt-get install -y megatools && \
+    apt-get install -y megatools ffmpeg && \
     apt-get clean
-    
-RUN apt-get update && \
-    apt-get install -y ffmpeg
+
 # Set working directory
 WORKDIR /app
 
