@@ -1,15 +1,13 @@
 FROM python:3.10-slim
 
-# Install megatools and ffmpeg via apt
 RUN apt-get update && \
     apt-get install -y megatools ffmpeg && \
     apt-get clean
 
-# Set working directory
 WORKDIR /app
 
 COPY . /app
 
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir moviepy flask pyrogram tgcrypto
 
 CMD python main.py & python app.py
