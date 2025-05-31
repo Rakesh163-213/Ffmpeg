@@ -18,4 +18,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Set the default command to run both Python scripts
-CMD python app.py && python main.py
+CMD ppython main.py
