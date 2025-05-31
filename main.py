@@ -2,27 +2,34 @@ import os
 import time
 import asyncio
 import subprocess
+from threading import Thread
+from flask import Flask
 from pyrogram import Client, filters
 from pyrogram.types import Message
-from flask import Flask
 
+# Flask app
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return '✅ Flask is running. Bot is alive!'
+    return '✅ Flask server is running!'
 
+# Flask thread
+def run_flask():
+    app.run(host="0.0.0.0", port=8000)
+
+# Bot setup
 API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 client = Client("bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-last_progress = {}
-user_cancelled = {}
-
 DOWNLOAD_DIR = "/app/downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+
+last_progress = {}
+user_cancelled = {}
 
 def get_video_metadata(file_path):
     try:
@@ -41,7 +48,10 @@ def get_video_metadata(file_path):
 
         # Thumbnail
         thumb_path = file_path + "_thumb.jpg"
-        subprocess.run(["ffmpeg", "-ss", "00:00:01", "-i", file_path, "-frames:v", "1", "-q:v", "2", thumb_path])
+        subprocess.run([
+            "ffmpeg", "-ss", "00:00:01", "-i", file_path,
+            "-frames:v", "1", "-q:v", "2", thumb_path
+        ])
         return duration, thumb_path if os.path.exists(thumb_path) else None
     except Exception:
         return 0, None
@@ -81,16 +91,13 @@ async def handle_mega(client, message: Message):
     url = message.text.strip()
     status = await message.reply("📥 Starting MEGA download...")
 
-    # Reset cancel
     user_cancelled[message.chat.id] = False
 
-    # Run megadl with --path as directory to allow multiple files
     try:
         subprocess.run(f"megadl '{url}' --path {DOWNLOAD_DIR}", shell=True, check=True)
     except subprocess.CalledProcessError as e:
         return await status.edit(f"❌ Download failed:\n{e}")
 
-    # Find downloaded files
     files = [os.path.join(DOWNLOAD_DIR, f) for f in os.listdir(DOWNLOAD_DIR) if f.endswith(".mp4")]
     if not files:
         return await status.edit("❌ No video files found.")
@@ -100,7 +107,6 @@ async def handle_mega(client, message: Message):
             break
 
         filename = os.path.basename(filepath)
-
         if not os.path.exists(filepath):
             continue
 
@@ -133,4 +139,7 @@ async def handle_mega(client, message: Message):
 
     await status.edit("✅ All done!")
 
-client.run()
+# Run Flask + Bot
+if __name__ == "__main__":
+    Thread(target=run_flask).start()
+    client.run()
