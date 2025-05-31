@@ -1,132 +1,114 @@
 import os
-import shutil
-import subprocess
 import time
+import asyncio
+import subprocess
 from pyrogram import Client, filters
 from pyrogram.types import Message
-from pyrogram.enums import ChatAction
-from config import API_ID, API_HASH, BOT_TOKEN
-from moviepy.editor import VideoFileClip
 
-DOWNLOAD_DIR = "./downloads"
+API_ID = int(os.getenv("API_ID"))
+API_HASH = os.getenv("API_HASH")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# Track upload progress
+client = Client("bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+
+# Track last progress message time per chat
 last_progress_time = {}
-last_progress_bytes = {}
 
-app = Client(
-    "mega_bot_session",
-    api_id=API_ID,
-    api_hash=API_HASH,
-    bot_token=BOT_TOKEN
-)
+# FFmpeg metadata extractor
+def get_video_metadata(file_path):
+    try:
+        cmd = [
+            "ffmpeg", "-i", file_path,
+            "-hide_banner"
+        ]
+        result = subprocess.run(cmd, stderr=subprocess.PIPE, text=True)
+        output = result.stderr
 
-# Determine if file is video
-def is_video(file_path):
-    return file_path.lower().endswith(('.mp4', '.mkv', '.mov', '.avi', '.webm'))
+        # Get duration
+        duration = 0
+        for line in output.splitlines():
+            if "Duration" in line:
+                duration_str = line.split("Duration:")[1].split(",")[0].strip()
+                h, m, s = duration_str.split(":")
+                duration = int(float(h) * 3600 + float(m) * 60 + float(s))
+                break
 
-# Create thumbnail
-def create_thumbnail(video_path, thumb_path):
-    subprocess.run([
-        "ffmpeg", "-i", video_path,
-        "-ss", "00:00:01.000", "-vframes", "1",
-        thumb_path
-    ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # Generate thumbnail
+        thumb_path = file_path + "_thumb.jpg"
+        subprocess.run([
+            "ffmpeg", "-ss", "00:00:01", "-i", file_path,
+            "-frames:v", "1", "-q:v", "2", thumb_path
+        ])
 
-# Get duration using moviepy
-def get_video_duration(path):
-    clip = VideoFileClip(path)
-    return int(clip.duration)
+        return duration, thumb_path if os.path.exists(thumb_path) else None
 
-# Upload progress with speed and ETA
-async def progress(current, total, message: Message, file_name):
+    except Exception:
+        return 0, None
+
+
+async def progress(current, total, message: Message, filename):
     now = time.time()
     chat_id = message.chat.id
+    last = last_progress_time.get(chat_id, 0)
 
-    prev_time = last_progress_time.get(chat_id, now)
-    prev_bytes = last_progress_bytes.get(chat_id, 0)
-
-    elapsed = max(now - prev_time, 1e-5)
-    speed = (current - prev_bytes) / elapsed
-    speed_mb = round(speed / (1024 * 1024), 2)
-
-    remaining = total - current
-    eta_str = time.strftime("%M:%S", time.gmtime(int(remaining / speed))) if speed > 0 else "Calculating..."
+    # throttle updates to every 10 seconds
+    if now - last < 10:
+        return
 
     last_progress_time[chat_id] = now
-    last_progress_bytes[chat_id] = current
-
     percent = int(current * 100 / total)
-    bar_len = 20
-    filled_len = percent * bar_len // 100
-    bar = "▰" * filled_len + "▱" * (bar_len - filled_len)
-
-    uploaded_mb = round(current / (1024 * 1024), 2)
+    bar = "▰" * (percent // 5) + "▱" * (20 - percent // 5)
+    uploaded = round(current / (1024 * 1024), 2)
     total_mb = round(total / (1024 * 1024), 2)
 
-    await message.edit_text(
-        f"📤 Uploading `{file_name}`\n\n"
-        f"{bar} {percent}%\n"
-        f"📦 {uploaded_mb}/{total_mb} MB\n"
-        f"⚡️ Speed: {speed_mb} MB/s\n"
-        f"⏳ ETA: {eta_str}"
-    )
+    try:
+        await message.edit_text(
+            f"📤 Uploading `{filename}`\n\n"
+            f"{bar} {percent}%\n"
+            f"📦 {uploaded}/{total_mb} MB"
+        )
+    except:
+        pass
 
-# Handle MEGA.nz links
-@app.on_message(filters.private & filters.text)
-async def mega_handler(client: Client, message: Message):
-    text = message.text
 
-    if "mega.nz" in text:
-        status = await message.reply_text("📥 Downloading from MEGA...")
+@client.on_message(filters.command("upload") & filters.private)
+async def mega_handler(client, message: Message):
+    url = message.text.split(" ", 1)[1] if " " in message.text else None
+    if not url:
+        return await message.reply("❌ Send a valid MEGA URL.")
 
-        try:
-            if not os.path.exists(DOWNLOAD_DIR):
-                os.makedirs(DOWNLOAD_DIR)
+    status = await message.reply("📥 Downloading from MEGA...")
 
-            cmd = f"megatools dl --path={DOWNLOAD_DIR} '{text}'"
-            subprocess.run(cmd, shell=True, check=True)
+    filename = "video.mp4"  # static name or extract from URL
+    filepath = f"/app/{filename}"
 
-            for root, dirs, files in os.walk(DOWNLOAD_DIR):
-                for file in files:
-                    file_path = os.path.join(root, file)
-                    file_msg = await message.reply_text("📤 Uploading...")
+    # Download using megatools
+    os.system(f"megadl '{url}' --path {filepath}")
 
-                    await client.send_chat_action(message.chat.id, ChatAction.UPLOAD_DOCUMENT)
+    if not os.path.exists(filepath):
+        return await status.edit("❌ Download failed.")
 
-                    if is_video(file_path):
-                        thumb_path = os.path.join(DOWNLOAD_DIR, "thumb.jpg")
-                        create_thumbnail(file_path, thumb_path)
-                        duration = get_video_duration(file_path)
+    await status.edit("✅ Download complete. Preparing to upload...")
 
-                        await client.send_video(
-                            chat_id=message.chat.id,
-                            video=file_path,
-                            caption=f"✅ Uploaded: `{file}`",
-                            duration=duration,
-                            thumb=thumb_path,
-                            supports_streaming=True,
-                            progress=progress,
-                            progress_args=(file_msg, file)
-                        )
-                        os.remove(thumb_path)
-                    else:
-                        await client.send_document(
-                            chat_id=message.chat.id,
-                            document=file_path,
-                            caption=f"✅ Uploaded: `{file}`",
-                            progress=progress,
-                            progress_args=(file_msg, file)
-                        )
+    try:
+        duration, thumb = get_video_metadata(filepath)
 
-                    os.remove(file_path)
+        await client.send_video(
+            chat_id=message.chat.id,
+            video=filepath,
+            duration=duration if duration else None,
+            thumb=thumb if thumb else None,
+            caption=f"✅ Uploaded `{filename}`",
+            progress=progress,
+            progress_args=(status, filename)
+        )
 
-            shutil.rmtree(DOWNLOAD_DIR)
+        if thumb and os.path.exists(thumb):
+            os.remove(thumb)
+        os.remove(filepath)
 
-        except Exception as e:
-            await status.edit_text(f"❌ Error: {str(e)}")
+    except Exception as e:
+        await status.edit(f"❌ Upload failed: {e}")
 
-    else:
-        await message.reply_text("❗ Please send a valid mega.nz link.")
 
-app.run()
+client.run()
