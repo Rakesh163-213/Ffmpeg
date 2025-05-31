@@ -4,6 +4,16 @@ import asyncio
 import subprocess
 from pyrogram import Client, filters
 from pyrogram.types import Message
+from flask import Flask
+
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return 'Hello, Flask is running on port 8000!'
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=8000)
 
 API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
