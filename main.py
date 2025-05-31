@@ -12,29 +12,24 @@ app = Flask(__name__)
 def home():
     return 'Hello, Flask is running on port 8000!'
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8000)
-
+# Initialize bot globally
 API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-
 client = Client("bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
 # Track last progress message time per chat
 last_progress_time = {}
+# Track ongoing downloads per chat
+active_downloads = {}
 
 # FFmpeg metadata extractor
 def get_video_metadata(file_path):
     try:
-        cmd = [
-            "ffmpeg", "-i", file_path,
-            "-hide_banner"
-        ]
+        cmd = ["ffmpeg", "-i", file_path, "-hide_banner"]
         result = subprocess.run(cmd, stderr=subprocess.PIPE, text=True)
         output = result.stderr
 
-        # Get duration
         duration = 0
         for line in output.splitlines():
             if "Duration" in line:
@@ -43,25 +38,19 @@ def get_video_metadata(file_path):
                 duration = int(float(h) * 3600 + float(m) * 60 + float(s))
                 break
 
-        # Generate thumbnail
         thumb_path = file_path + "_thumb.jpg"
-        subprocess.run([
-            "ffmpeg", "-ss", "00:00:01", "-i", file_path,
-            "-frames:v", "1", "-q:v", "2", thumb_path
-        ])
+        subprocess.run(["ffmpeg", "-ss", "00:00:01", "-i", file_path, "-frames:v", "1", "-q:v", "2", thumb_path])
 
         return duration, thumb_path if os.path.exists(thumb_path) else None
 
     except Exception:
         return 0, None
 
-
 async def progress(current, total, message: Message, filename):
     now = time.time()
     chat_id = message.chat.id
     last = last_progress_time.get(chat_id, 0)
 
-    # throttle updates to every 10 seconds
     if now - last < 10:
         return
 
@@ -80,6 +69,16 @@ async def progress(current, total, message: Message, filename):
     except:
         pass
 
+@client.on_message(filters.command("cancel") & filters.private)
+async def cancel_handler(client, message: Message):
+    chat_id = message.chat.id
+    if chat_id in active_downloads:
+        process = active_downloads[chat_id]
+        process.terminate()
+        del active_downloads[chat_id]
+        await message.reply("❌ Download cancelled.")
+    else:
+        await message.reply("⚠️ No active download found.")
 
 @client.on_message(filters.command("upload") & filters.private)
 async def mega_handler(client, message: Message):
@@ -88,12 +87,18 @@ async def mega_handler(client, message: Message):
         return await message.reply("❌ Send a valid MEGA URL.")
 
     status = await message.reply("📥 Downloading from MEGA...")
-
-    filename = "video.mp4"  # static name or extract from URL
+    filename = "video.mp4"
     filepath = f"/app/{filename}"
 
-    # Download using megatools
-    os.system(f"megadl '{url}' --path {filepath}")
+    try:
+        cmd = ["megadl", url, "--path", filepath]
+        process = subprocess.Popen(cmd)
+        active_downloads[message.chat.id] = process
+        process.wait()
+    except Exception as e:
+        return await status.edit(f"❌ Download failed: {e}")
+    finally:
+        active_downloads.pop(message.chat.id, None)
 
     if not os.path.exists(filepath):
         return await status.edit("❌ Download failed.")
@@ -102,7 +107,6 @@ async def mega_handler(client, message: Message):
 
     try:
         duration, thumb = get_video_metadata(filepath)
-
         await client.send_video(
             chat_id=message.chat.id,
             video=filepath,
@@ -120,5 +124,7 @@ async def mega_handler(client, message: Message):
     except Exception as e:
         await status.edit(f"❌ Upload failed: {e}")
 
+client.start()
 
-client.run()
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=8000)
