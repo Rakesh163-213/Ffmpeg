@@ -32,14 +32,10 @@ downloads = {}
 
 def get_video_metadata(file_path):
     try:
-        cmd = [
-            "ffmpeg", "-i", file_path,
-            "-hide_banner"
-        ]
+        cmd = ["ffmpeg", "-i", file_path, "-hide_banner"]
         result = subprocess.run(cmd, stderr=subprocess.PIPE, text=True)
         output = result.stderr
 
-        # Get duration
         duration = 0
         for line in output.splitlines():
             if "Duration" in line:
@@ -48,18 +44,14 @@ def get_video_metadata(file_path):
                 duration = int(float(h) * 3600 + float(m) * 60 + float(s))
                 break
 
-        # Generate thumbnail
         thumb_path = file_path + "_thumb.jpg"
-        subprocess.run([
-            "ffmpeg", "-ss", "00:00:01", "-i", file_path,
-            "-frames:v", "1", "-q:v", "2", thumb_path
-        ])
+        subprocess.run(["ffmpeg", "-ss", "00:00:01", "-i", file_path,
+                        "-frames:v", "1", "-q:v", "2", thumb_path])
 
         return duration, thumb_path if os.path.exists(thumb_path) else None
 
     except Exception:
         return 0, None
-
 
 last_progress_time = {}
 
@@ -95,53 +87,50 @@ async def cancel_download(client, message: Message):
         downloads.pop(user_id)
         await message.reply("❌ Download canceled.")
     else:
-        await message.reply("⚠️ No download to cancel.")
+        await message.reply("⚠️ No active download to cancel.")
 
-@client.on_message(filters.command("upload") & filters.private)
-async def mega_handler(client, message: Message):
-    url = message.text.split(" ", 1)[1] if " " in message.text else None
-    if not url:
-        return await message.reply("❌ Send a valid MEGA URL.")
+@client.on_message(filters.private & filters.text)
+async def handle_mega_url(client, message: Message):
+    url = message.text.strip()
+    if not url.startswith("https://mega.nz"):
+        return await message.reply("❌ Please send a valid MEGA URL.")
 
     status = await message.reply("📥 Downloading from MEGA...")
 
-    filename = "video.mp4"
-    filepath = f"/app/{filename}"
+    filename = f"video_{message.from_user.id}.mp4"
+    filepath = os.path.join("/app", filename)
 
     try:
         user_id = message.from_user.id
-        downloads[user_id] = subprocess.Popen(
-            ["megadl", url, "--path", filepath]
-        )
+        downloads[user_id] = subprocess.Popen(["megadl", url, "--path", "."])
 
-        await asyncio.sleep(1)
         while downloads[user_id].poll() is None:
             await asyncio.sleep(5)
 
         downloads.pop(user_id)
 
-        if not os.path.exists(filepath):
+        downloaded_file = next((f for f in os.listdir(".") if f.endswith(".mp4")), None)
+        if not downloaded_file:
             return await status.edit("❌ Download failed.")
 
-        await status.edit("✅ Download complete. Preparing to upload...")
-
-        duration, thumb = get_video_metadata(filepath)
+        duration, thumb = get_video_metadata(downloaded_file)
 
         await client.send_video(
             chat_id=message.chat.id,
-            video=filepath,
+            video=downloaded_file,
             duration=duration if duration else None,
             thumb=thumb if thumb else None,
-            caption=f"✅ Uploaded `{filename}`",
+            caption=f"✅ Uploaded `{downloaded_file}`",
             progress=progress,
-            progress_args=(status, filename)
+            progress_args=(status, downloaded_file)
         )
 
         if thumb and os.path.exists(thumb):
             os.remove(thumb)
-        os.remove(filepath)
+        os.remove(downloaded_file)
 
     except Exception as e:
         await status.edit(f"❌ Upload failed: {e}")
 
 client.run()
+        
