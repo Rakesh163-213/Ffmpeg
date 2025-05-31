@@ -19,4 +19,4 @@ RUN pip install --no-cache-dir flask pyrogram tgcrypto
 
 # Run start.sh (which should start your bot or other services)
 #CMD ["./start.sh"]
-CMD python main.py & python app.py
+CMD python main.py
