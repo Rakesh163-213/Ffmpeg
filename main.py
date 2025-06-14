@@ -83,7 +83,7 @@ async def upload_progress(current, total, message: Message, start_time, filename
 
 @client.on_message(filters.command("start") & filters.private)
 async def start(client, message):
-    await message.reply("👋 Send me a MEGA URL to start downloading and uploading it to Telegram.")
+    await message.reply("👋 Send me a MEGA URL to start downloading and uploading it to Telegram\nUse /cancel to cancel the task(may not work properly!).")
 
 @client.on_message(filters.command("cancel") & filters.private)
 async def cancel_upload(client, message: Message):
