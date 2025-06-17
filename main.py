@@ -16,7 +16,7 @@ def home():
 
 # Flask thread
 def run_flask():
-    app.run(host="0.0.0.0", port=8000)
+    app.run(host="0.0.0.0", port=8066)
 
 # Bot setup
 API_ID = int(os.getenv("API_ID"))
