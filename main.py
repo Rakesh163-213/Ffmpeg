@@ -48,7 +48,7 @@ def get_video_metadata(file_path):
 
         thumb_path = file_path + "_thumb.jpg"
         subprocess.run([
-            "ffmpeg", "-ss", "00:00:01", "-i", file_path,
+            "ffmpeg", "-y", "-ss", "00:00:01", "-i", file_path,
             "-frames:v", "1", "-q:v", "2", thumb_path
         ])
         return duration, thumb_path if os.path.exists(thumb_path) else None
